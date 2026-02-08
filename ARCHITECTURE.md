@@ -47,6 +47,8 @@ shared/
 │   ├── cn.ts                 # clsx + tailwind-merge utility
 │   ├── copyToClipboard.ts    # Clipboard helper
 │   ├── formatUrl.ts          # URL display formatting
+│   ├── errors.ts             # AppError hierarchy + toErrorResponse()
+│   ├── logger.ts             # Structured JSON logger
 │   ├── types/
 │   │   └── metadata-item.ts  # Shared type definitions
 │   └── metadata/
@@ -128,11 +130,10 @@ widgets/
 │   └── ui/
 │       └── metadata-dashboard.tsx   # 4-tab dashboard (Overview, Social, Technical, Sitemap)
 │
-|
 ├── footer/
 │   └── ui/
 │       └── Footer.tsx              # App Footer
-|
+│
 └── navbar/
     └── ui/
         └── Navbar.tsx               # App navigation bar
@@ -161,28 +162,81 @@ pages/
 
 ### Metadata Checker (`/metadata`)
 
-```
-MetadataForm (input URL)
-  → useMetadataQuery (React Query)
-    → checkMetadata() (entities/metadata/api)
-      → POST /api/metadata
-        → fetchMetadata() (shared/lib — Cheerio HTML parser)
-          → Returns MetadataResult
-            → MetadataDashboard (widgets) renders results
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant MetadataPage
+    participant ReactQuery
+    participant API as /api/metadata
+    participant Cheerio as fetchMetadata
+    participant Target as Target URL
+
+    Browser->>MetadataPage: Enter URL, submit
+    MetadataPage->>ReactQuery: useMetadataQuery(url)
+    ReactQuery->>API: POST /api/metadata { url }
+    API->>Cheerio: fetchMetadata(url)
+    Cheerio->>Target: GET url
+    Target-->>Cheerio: HTML
+    Cheerio-->>API: MetadataResult
+    API-->>ReactQuery: JSON response
+    ReactQuery-->>MetadataPage: data
+    MetadataPage->>Browser: Render MetadataDashboard
 ```
 
 ### AI SEO Generator (`/generate`)
 
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant GeneratePage
+    participant ReactQuery
+    participant API as /api/generate
+    participant Cheerio as fetchMetadata
+    participant Gemini as Google Gemini AI
+
+    Browser->>GeneratePage: Enter URL or prompt, submit
+    GeneratePage->>ReactQuery: useGenerateMutation(input)
+    ReactQuery->>API: POST /api/generate { url?, prompt? }
+    opt URL provided
+        API->>Cheerio: fetchMetadata(url)
+        Cheerio-->>API: existing MetadataResult
+    end
+    API->>Gemini: generateContent(prompt)
+    Gemini-->>API: JSON with metadata + aiAnalysis
+    API-->>ReactQuery: GeneratedMetadata
+    ReactQuery-->>GeneratePage: data
+    GeneratePage->>Browser: Render MetadataDashboard
 ```
-GenerateForm (input URL or prompt)
-  → useGenerateMutation (React Query)
-    → generateMetadata() (features/generate-metadata/api)
-      → POST /api/generate
-        → fetchMetadata() (if URL provided — get existing metadata)
-        → Gemini AI (gemini-2.5-flash — generate optimized metadata)
-          → Returns MetadataResult
-            → MetadataDashboard (widgets) renders results
+
+## Error Handling
+
+API routes use a structured error system defined in `src/shared/lib/errors.ts`:
+
+| Error Class | Status | Code | Use Case |
+|-------------|--------|------|----------|
+| `ValidationError` | 400 | `VALIDATION_ERROR` | Missing or invalid input |
+| `ExternalServiceError` | 502 | `EXTERNAL_SERVICE_ERROR` | Upstream failure (Gemini, target URL) |
+| `ConfigurationError` | 500 | `CONFIGURATION_ERROR` | Missing environment variables |
+
+All API errors return a consistent shape:
+
+```json
+{
+  "error": {
+    "message": "Human-readable description",
+    "code": "MACHINE_READABLE_CODE"
+  }
+}
 ```
+
+Structured logging via `src/shared/lib/logger.ts` outputs JSON with timestamp, level, and context fields.
+
+## Testing
+
+- **Unit tests** (Vitest) — `src/**/*.test.ts` and `app/api/**/*.test.ts`
+  - Utility functions, metadata parser, API routes, error handling
+- **E2E tests** (Playwright) — `e2e/*.spec.ts`
+  - Full user flows: navigation, metadata check, AI generation
 
 ## Key Design Decisions
 
@@ -195,3 +249,5 @@ GenerateForm (input URL or prompt)
 | React Query for server state | Caching, deduplication, and loading/error states out of the box |
 | Server-side HTML parsing (Cheerio) | Avoids CORS issues — metadata fetched on the server, not the browser |
 | Gemini on server route only | API key stays server-side, never exposed to the client |
+| Typed error hierarchy | Consistent API responses, machine-readable codes for client-side handling |
+| Structured JSON logging | Production-ready log format for aggregation and monitoring |
