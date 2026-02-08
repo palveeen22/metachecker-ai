@@ -1,0 +1,1 @@
+export { MetadataPage } from "./ui/MetadataPage";
