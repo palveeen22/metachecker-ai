@@ -6,9 +6,9 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 1. Fork the repository and clone it locally
    ```bash
-   git clone https://github.com/palveeen22/seo-ai.git
+   git clone https://github.com/palveeen22/metachecker-ai.git
    
-   cd seo-ai
+   cd metachecker-ai
    ```
 2. Install dependencies:
    ```bash

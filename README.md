@@ -75,8 +75,8 @@ graph TD
 
 ```bash
 # Clone Repository
-git clone https://github.com/palveeen22/seo-ai.git
-cd seo-ai
+git clone https://github.com/palveeen22/metachecker-ai.git
+cd metachecker-ai
 
 # Install dependencies
 pnpm install
