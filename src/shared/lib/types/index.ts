@@ -1,0 +1,1 @@
+export { type MetadataItem } from './metadata-item';
