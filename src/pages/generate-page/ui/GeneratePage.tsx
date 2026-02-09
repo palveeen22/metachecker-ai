@@ -1,15 +1,21 @@
-'use client'
+"use client";
 
-import { BackButton, Badge, Skeleton } from '@/shared/ui'
-import { GenerateForm, useGenerateMutation } from '@/features/generate-metadata'
-import { MetadataDashboard } from '@/widgets/metadata-dashboard'
-import { Sparkles } from 'lucide-react'
+import { useState } from "react";
+import { BackButton, Badge, Skeleton, Switch } from "@/shared/ui";
+import {
+  GenerateForm,
+  useGenerateMutation,
+} from "@/features/generate-metadata";
+import { MetadataDashboard } from "@/widgets/metadata-dashboard";
+import { SeoWizard } from "@/widgets/seo-wizard";
+import { Sparkles, GraduationCap } from "lucide-react";
 
 export function GeneratePage() {
-  const { mutate, data, isPending, error } = useGenerateMutation()
+  const { mutate, data, isPending, error } = useGenerateMutation();
+  const [specialistMode, setSpecialistMode] = useState(false);
 
   function handleSubmit(input: { url?: string; prompt?: string }) {
-    mutate(input)
+    mutate(input);
   }
 
   return (
@@ -23,11 +29,13 @@ export function GeneratePage() {
               AI Powered
             </Badge>
           </div>
-          <h1 className="text-5xl font-bold tracking-tight">AI SEO Generator</h1>
+          <h1 className="text-5xl font-bold tracking-tight">
+            AI SEO Generator
+          </h1>
           <p className="mt-2 text-base text-muted-foreground">
-            Generate optimized metadata for your pages using AI.
-            Provide a URL to improve existing metadata, or describe your page
-            to generate metadata from scratch.
+            Generate optimized metadata for your pages using AI. Provide a URL
+            to improve existing metadata, or describe your page to generate
+            metadata from scratch.
           </p>
         </header>
 
@@ -36,6 +44,21 @@ export function GeneratePage() {
             isPending={isPending}
             onSubmit={handleSubmit}
             errorMessage={error?.message}
+          />
+        </div>
+
+        <div className="mb-6 flex items-center justify-center gap-3">
+          <GraduationCap className="size-4 text-muted-foreground" />
+          <label
+            htmlFor="specialist-mode"
+            className="cursor-pointer text-sm font-medium"
+          >
+            Guide me like an SEO specialist
+          </label>
+          <Switch
+            id="specialist-mode"
+            checked={specialistMode}
+            onCheckedChange={setSpecialistMode}
           />
         </div>
 
@@ -60,10 +83,18 @@ export function GeneratePage() {
                 — Review and use these optimized metadata for better SEO
               </span>
             </div>
-            <MetadataDashboard metadata={data} />
+
+            {specialistMode ? (
+              <SeoWizard
+                metadata={data}
+                onExitWizard={() => setSpecialistMode(false)}
+              />
+            ) : (
+              <MetadataDashboard metadata={data} />
+            )}
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }

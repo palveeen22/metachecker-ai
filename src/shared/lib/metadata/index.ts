@@ -1,2 +1,7 @@
-export { fetchMetadata } from './fetch-metadata'
-export type { MetadataResult } from './types'
+export { fetchMetadata } from "./fetch-metadata";
+export type {
+  MetadataResult,
+  MissingField,
+  AiAnalysis,
+  GeneratedMetadata,
+} from "./types";

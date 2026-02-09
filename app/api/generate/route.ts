@@ -1,45 +1,36 @@
-import { NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import { fetchMetadata } from '@/shared/lib/metadata'
-import type { MetadataResult } from '@/shared/lib/metadata'
+import { NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { fetchMetadata } from "@/shared/lib/metadata";
+import type {
+  MetadataResult,
+  MissingField,
+  GeneratedMetadata,
+} from "@/shared/lib/metadata";
 import {
   ValidationError,
   ConfigurationError,
   ExternalServiceError,
   toErrorResponse,
   logger,
-} from '@/shared/lib'
+} from "@/shared/lib";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 function getModel() {
   return genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: "gemini-2.5-flash",
     generationConfig: {
       temperature: 0.7,
       topP: 0.95,
       topK: 40,
-    }
-  })
+    },
+  });
 }
 
-interface MissingField {
-  field: string
-  importance: 'critical' | 'high' | 'medium' | 'low'
-  reason: string
-  recommendation: string
-}
-
-interface GeneratedMetadata extends MetadataResult {
-  aiAnalysis?: {
-    missingFields: MissingField[]
-    improvements: string[]
-    seoScore: number
-    summary: string
-  }
-}
-
-function buildPrompt(existingMetadata?: MetadataResult, prompt?: string): string {
+function buildPrompt(
+  existingMetadata?: MetadataResult,
+  prompt?: string,
+): string {
   const base = `You are an expert SEO consultant and metadata specialist. Analyze the webpage content and existing metadata, then provide:
 
 1. **Complete optimized metadata** following best practices
@@ -145,7 +136,7 @@ Return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
     "seoScore": 75,  // Score out of 100
     "summary": "Overall assessment and priority actions"
   }
-}`
+}`;
 
   if (existingMetadata) {
     return `${base}
@@ -166,7 +157,7 @@ Focus on:
 - Writing descriptions that drive action
 - Ensuring all critical fields for social sharing are optimized
 - Identifying technical SEO issues
-- Providing clear next steps for the user`
+- Providing clear next steps for the user`;
   }
 
   if (prompt) {
@@ -185,153 +176,176 @@ Consider:
 - Technical SEO requirements
 - Brand voice and tone
 
-Provide actionable recommendations for each field, especially for images and technical setup.`
+Provide actionable recommendations for each field, especially for images and technical setup.`;
   }
 
-  return base
+  return base;
 }
 
 export async function POST(request: Request) {
   try {
     if (!process.env.GEMINI_API_KEY) {
-      throw new ConfigurationError('Gemini API key is not configured')
+      throw new ConfigurationError("Gemini API key is not configured");
     }
 
-    const { url, prompt } = await request.json()
+    const { url, prompt } = await request.json();
 
     if (!url && !prompt) {
-      throw new ValidationError('URL or prompt is required')
+      throw new ValidationError("URL or prompt is required");
     }
 
-    let existingMetadata: MetadataResult | undefined
+    let existingMetadata: MetadataResult | undefined;
     if (url) {
       try {
-        logger.info('Fetching existing metadata for generation', { url })
-        existingMetadata = await fetchMetadata(url)
+        logger.info("Fetching existing metadata for generation", { url });
+        existingMetadata = await fetchMetadata(url);
       } catch (error) {
-        logger.warn('Failed to fetch existing metadata, continuing with generation', { url })
+        logger.warn(
+          "Failed to fetch existing metadata, continuing with generation",
+          { url },
+        );
       }
     }
 
-    logger.info('Generating metadata with Gemini', { url, hasPrompt: !!prompt })
-    const geminiPrompt = buildPrompt(existingMetadata, prompt)
-    const model = getModel()
-    const result = await model.generateContent(geminiPrompt)
-    const textContent = result.response.text()
+    logger.info("Generating metadata with Gemini", {
+      url,
+      hasPrompt: !!prompt,
+    });
+    const geminiPrompt = buildPrompt(existingMetadata, prompt);
+    const model = getModel();
+    const result = await model.generateContent(geminiPrompt);
+    const textContent = result.response.text();
 
     if (!textContent) {
-      throw new ExternalServiceError('gemini', 'No response from AI')
+      throw new ExternalServiceError("gemini", "No response from AI");
     }
 
     // Clean and parse JSON response
     let jsonString = textContent
-      .replace(/```json?\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim()
+      .replace(/```json?\n?/g, "")
+      .replace(/```\n?/g, "")
+      .trim();
 
     // Handle cases where AI wraps response in extra text
-    const jsonMatch = jsonString.match(/\{[\s\S]*\}/)
+    const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      jsonString = jsonMatch[0]
+      jsonString = jsonMatch[0];
     }
 
     let aiResponse: {
-      metadata: MetadataResult
-      aiAnalysis: GeneratedMetadata['aiAnalysis']
-    }
+      metadata: MetadataResult;
+      aiAnalysis: GeneratedMetadata["aiAnalysis"];
+    };
 
     try {
-      aiResponse = JSON.parse(jsonString)
+      aiResponse = JSON.parse(jsonString);
     } catch {
       throw new ExternalServiceError(
-        'gemini',
-        'Failed to parse AI response. The AI returned invalid JSON.'
-      )
+        "gemini",
+        "Failed to parse AI response. The AI returned invalid JSON.",
+      );
     }
 
     const generatedMetadata: GeneratedMetadata = {
       ...aiResponse.metadata,
-      aiAnalysis: aiResponse.aiAnalysis
-    }
+      aiAnalysis: aiResponse.aiAnalysis,
+    };
 
     // Preserve existing technical fields that AI cannot generate
     if (existingMetadata) {
       // Keep actual URLs and technical data
-      generatedMetadata.ogImage = existingMetadata.ogImage
-      generatedMetadata.ogImageWidth = existingMetadata.ogImageWidth
-      generatedMetadata.ogImageHeight = existingMetadata.ogImageHeight
-      generatedMetadata.twitterImage = existingMetadata.twitterImage
-      generatedMetadata.favicon = existingMetadata.favicon
-      generatedMetadata.appleTouchIcon = existingMetadata.appleTouchIcon
-      generatedMetadata.manifest = existingMetadata.manifest
-      generatedMetadata.canonicalUrl = existingMetadata.canonicalUrl
-      generatedMetadata.ogUrl = existingMetadata.ogUrl || existingMetadata.canonicalUrl
-      generatedMetadata.sitemapUrl = existingMetadata.sitemapUrl
-      generatedMetadata.sitemapExists = existingMetadata.sitemapExists
-      generatedMetadata.robotsTxtExists = existingMetadata.robotsTxtExists
-      generatedMetadata.robotsTxtContent = existingMetadata.robotsTxtContent
-      generatedMetadata.alternateUrls = existingMetadata.alternateUrls
-      generatedMetadata.prevPage = existingMetadata.prevPage
-      generatedMetadata.nextPage = existingMetadata.nextPage
+      generatedMetadata.ogImage = existingMetadata.ogImage;
+      generatedMetadata.ogImageWidth = existingMetadata.ogImageWidth;
+      generatedMetadata.ogImageHeight = existingMetadata.ogImageHeight;
+      generatedMetadata.twitterImage = existingMetadata.twitterImage;
+      generatedMetadata.favicon = existingMetadata.favicon;
+      generatedMetadata.appleTouchIcon = existingMetadata.appleTouchIcon;
+      generatedMetadata.manifest = existingMetadata.manifest;
+      generatedMetadata.canonicalUrl = existingMetadata.canonicalUrl;
+      generatedMetadata.ogUrl =
+        existingMetadata.ogUrl || existingMetadata.canonicalUrl;
+      generatedMetadata.sitemapUrl = existingMetadata.sitemapUrl;
+      generatedMetadata.sitemapExists = existingMetadata.sitemapExists;
+      generatedMetadata.robotsTxtExists = existingMetadata.robotsTxtExists;
+      generatedMetadata.robotsTxtContent = existingMetadata.robotsTxtContent;
+      generatedMetadata.alternateUrls = existingMetadata.alternateUrls;
+      generatedMetadata.prevPage = existingMetadata.prevPage;
+      generatedMetadata.nextPage = existingMetadata.nextPage;
 
       // Update Discord/Slack with generated OG values if no image exists
-      generatedMetadata.discordTitle = generatedMetadata.ogTitle
-      generatedMetadata.discordDescription = generatedMetadata.ogDescription
-      generatedMetadata.discordImage = existingMetadata.ogImage
-      generatedMetadata.discordType = generatedMetadata.ogType
-      generatedMetadata.slackTitle = generatedMetadata.ogTitle
-      generatedMetadata.slackDescription = generatedMetadata.ogDescription
-      generatedMetadata.slackImage = existingMetadata.ogImage
-      generatedMetadata.slackType = generatedMetadata.ogType
+      generatedMetadata.discordTitle = generatedMetadata.ogTitle;
+      generatedMetadata.discordDescription = generatedMetadata.ogDescription;
+      generatedMetadata.discordImage = existingMetadata.ogImage;
+      generatedMetadata.discordType = generatedMetadata.ogType;
+      generatedMetadata.slackTitle = generatedMetadata.ogTitle;
+      generatedMetadata.slackDescription = generatedMetadata.ogDescription;
+      generatedMetadata.slackImage = existingMetadata.ogImage;
+      generatedMetadata.slackType = generatedMetadata.ogType;
 
       // Add image recommendations if missing
       if (!existingMetadata.ogImage && generatedMetadata.aiAnalysis) {
-        const hasImageRecommendation = generatedMetadata.aiAnalysis.missingFields
-          .some(f => f.field === 'ogImage')
+        const hasImageRecommendation =
+          generatedMetadata.aiAnalysis.missingFields.some(
+            (f) => f.field === "ogImage",
+          );
 
         if (!hasImageRecommendation) {
           generatedMetadata.aiAnalysis.missingFields.push({
-            field: 'ogImage',
-            importance: 'critical',
-            reason: 'Social media platforms require images for rich previews. Without an OG image, your links will appear as plain text, significantly reducing click-through rates.',
-            recommendation: 'Create a 1200x630px image (aspect ratio 1.91:1) featuring your logo, primary message, and brand colors. Optimal file size: under 8MB. Formats: JPG or PNG. Tools: Canva, Figma, or Adobe Express. Ensure text is readable when scaled down to thumbnail size.'
-          })
+            field: "ogImage",
+            importance: "critical",
+            reason:
+              "Social media platforms require images for rich previews. Without an OG image, your links will appear as plain text, significantly reducing click-through rates.",
+            recommendation:
+              "Create a 1200x630px image (aspect ratio 1.91:1) featuring your logo, primary message, and brand colors. Optimal file size: under 8MB. Formats: JPG or PNG. Tools: Canva, Figma, or Adobe Express. Ensure text is readable when scaled down to thumbnail size.",
+          });
         }
       }
 
       if (!existingMetadata.twitterImage && generatedMetadata.aiAnalysis) {
-        const hasTwitterImageRec = generatedMetadata.aiAnalysis.missingFields
-          .some(f => f.field === 'twitterImage')
+        const hasTwitterImageRec =
+          generatedMetadata.aiAnalysis.missingFields.some(
+            (f) => f.field === "twitterImage",
+          );
 
         if (!hasTwitterImageRec) {
           generatedMetadata.aiAnalysis.missingFields.push({
-            field: 'twitterImage',
-            importance: 'high',
-            reason: 'Twitter uses its own image tag for card previews. Falls back to OG image, but dedicated Twitter images can be optimized for the platform.',
-            recommendation: 'Use the same 1200x630px image as OG image, or create a Twitter-specific version optimized for the platform\'s audience. Consider adding Twitter handle or hashtag to the image.'
-          })
+            field: "twitterImage",
+            importance: "high",
+            reason:
+              "Twitter uses its own image tag for card previews. Falls back to OG image, but dedicated Twitter images can be optimized for the platform.",
+            recommendation:
+              "Use the same 1200x630px image as OG image, or create a Twitter-specific version optimized for the platform's audience. Consider adding Twitter handle or hashtag to the image.",
+          });
         }
       }
 
       if (!existingMetadata.favicon && generatedMetadata.aiAnalysis) {
         generatedMetadata.aiAnalysis.missingFields.push({
-          field: 'favicon',
-          importance: 'medium',
-          reason: 'Favicon appears in browser tabs, bookmarks, and mobile home screens. Missing favicon makes your site look unprofessional.',
-          recommendation: 'Create a 32x32px (minimum) or 512x512px (recommended) square icon in ICO, PNG, or SVG format. Use your logo or brand mark. Ensure it\'s recognizable at small sizes. Generate multiple sizes (16x16, 32x32, 192x192, 512x512) for best cross-platform support.'
-        })
+          field: "favicon",
+          importance: "medium",
+          reason:
+            "Favicon appears in browser tabs, bookmarks, and mobile home screens. Missing favicon makes your site look unprofessional.",
+          recommendation:
+            "Create a 32x32px (minimum) or 512x512px (recommended) square icon in ICO, PNG, or SVG format. Use your logo or brand mark. Ensure it's recognizable at small sizes. Generate multiple sizes (16x16, 32x32, 192x192, 512x512) for best cross-platform support.",
+        });
       }
     }
 
     // Ensure boolean fields have defaults
-    generatedMetadata.sitemapExists = generatedMetadata.sitemapExists ?? false
-    generatedMetadata.robotsTxtExists = generatedMetadata.robotsTxtExists ?? false
+    generatedMetadata.sitemapExists = generatedMetadata.sitemapExists ?? false;
+    generatedMetadata.robotsTxtExists =
+      generatedMetadata.robotsTxtExists ?? false;
 
-    logger.info('Metadata generated successfully', { url, hasPrompt: !!prompt })
-    return NextResponse.json(generatedMetadata)
+    logger.info("Metadata generated successfully", {
+      url,
+      hasPrompt: !!prompt,
+    });
+    return NextResponse.json(generatedMetadata);
   } catch (error) {
-    logger.error('Metadata generation failed', error, { route: '/api/generate' })
-    const { body, status } = toErrorResponse(error)
-    return NextResponse.json(body, { status })
+    logger.error("Metadata generation failed", error, {
+      route: "/api/generate",
+    });
+    const { body, status } = toErrorResponse(error);
+    return NextResponse.json(body, { status });
   }
 }
